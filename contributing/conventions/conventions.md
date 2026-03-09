@@ -1,21 +1,39 @@
 # Conventions for writing conventions
 
-## Conventions
+<h2>Table of contents</h2>
 
-- [DRY](#dry)
-- [Hyperlinks when mentioning sections](#hyperlinks-when-mentioning-sections)
-- [No Markdown tables](#no-markdown-tables)
-- [Section link text](#section-link-text)
+- [1. Numbered sections](#1-numbered-sections)
+- [2. Table of contents](#2-table-of-contents)
+- [3. DRY](#3-dry)
+- [4. Hyperlinks when mentioning sections](#4-hyperlinks-when-mentioning-sections)
+- [5. No Markdown tables](#5-no-markdown-tables)
+- [6. Section link text](#6-section-link-text)
 
 ---
 
-## DRY
+## 1. Numbered sections
+
+All top-level sections must be numbered starting from 1.
+Nested subsections use the format `S.N.` where S is the parent section number (e.g., `2.1.`, `2.2.`).
+
+---
+
+## 2. Table of contents
+
+Each convention file must include a table of contents immediately after the title.
+Use an HTML heading (`<h2>Table of contents</h2>`) instead of a Markdown `##` heading so the TOC entry does not appear inside its own list.
+Follow the HTML heading with a blank line, then the TOC list.
+The TOC list must be in Markdown format (bullet list with `- [Link](#anchor)` syntax).
+
+---
+
+## 3. DRY
 
 Don't duplicate content across convention files. If a rule already exists in one file, reference it from others using a hyperlink instead of repeating it.
 
 ---
 
-## Hyperlinks when mentioning sections
+## 4. Hyperlinks when mentioning sections
 
 When mentioning a section by name, always link to it. For sections in another file, include the file path in the link.
 
@@ -27,13 +45,13 @@ Bad: `See the Section name section.`
 
 ---
 
-## No Markdown tables
+## 5. No Markdown tables
 
 Never use Markdown tables in convention files. Use bullet lists instead — they are easier to read, write, and maintain.
 
 ---
 
-## Section link text
+## 6. Section link text
 
 Don't include the section number in the link text when linking inline. Use only the section name.
 
