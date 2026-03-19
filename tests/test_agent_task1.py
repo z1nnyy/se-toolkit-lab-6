@@ -18,6 +18,7 @@ AGENT_PATH = PROJECT_ROOT / "agent.py"
 def run_agent_with_mock_server(
     question: str,
     handler_type: type[BaseHTTPRequestHandler],
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run the agent against a local mock LLM server."""
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler_type)
@@ -28,6 +29,8 @@ def run_agent_with_mock_server(
     env["LLM_API_KEY"] = "test-key"
     env["LLM_API_BASE"] = f"http://127.0.0.1:{server.server_port}/v1"
     env["LLM_MODEL"] = "mock-model"
+    if extra_env:
+        env.update(extra_env)
 
     try:
         result = subprocess.run(
