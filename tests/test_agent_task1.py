@@ -1,4 +1,4 @@
-"""Regression tests for agent.py (Task 1)."""
+"""Regression tests for agent.py."""
 
 from __future__ import annotations
 
@@ -15,8 +15,39 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 AGENT_PATH = PROJECT_ROOT / "agent.py"
 
 
-class MockLLMHandler(BaseHTTPRequestHandler):
-    """Return a fixed OpenAI-compatible chat completion response."""
+def run_agent_with_mock_server(
+    question: str,
+    handler_type: type[BaseHTTPRequestHandler],
+) -> subprocess.CompletedProcess[str]:
+    """Run the agent against a local mock LLM server."""
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_type)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    env = os.environ.copy()
+    env["LLM_API_KEY"] = "test-key"
+    env["LLM_API_BASE"] = f"http://127.0.0.1:{server.server_port}/v1"
+    env["LLM_MODEL"] = "mock-model"
+
+    try:
+        result = subprocess.run(
+            [sys.executable, str(AGENT_PATH), question],
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
+            env=env,
+            check=False,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=1)
+
+    return result
+
+
+class MockSimpleAnswerHandler(BaseHTTPRequestHandler):
+    """Return a final JSON answer without tool calls."""
 
     def do_POST(self) -> None:  # noqa: N802
         content_length = int(self.headers.get("Content-Length", "0"))
@@ -25,13 +56,16 @@ class MockLLMHandler(BaseHTTPRequestHandler):
 
         assert payload["model"] == "mock-model"
         assert payload["messages"][-1]["content"] == "What is 2+2?"
+        assert isinstance(payload["tools"], list)
 
         response = {
             "choices": [
                 {
                     "message": {
                         "role": "assistant",
-                        "content": "2 + 2 = 4.",
+                        "content": json.dumps(
+                            {"answer": "2 + 2 = 4.", "source": "wiki/math.md#addition"}
+                        ),
                     }
                 }
             ]
@@ -45,39 +79,16 @@ class MockLLMHandler(BaseHTTPRequestHandler):
         self.wfile.write(response_bytes)
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A003
-        """Silence noisy test server logs."""
         return
 
 
 def test_agent_output_structure() -> None:
-    """Run the agent as a subprocess and validate the output JSON."""
-    server = ThreadingHTTPServer(("127.0.0.1", 0), MockLLMHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-
-    env = os.environ.copy()
-    env["LLM_API_KEY"] = "test-key"
-    env["LLM_API_BASE"] = f"http://127.0.0.1:{server.server_port}/v1"
-    env["LLM_MODEL"] = "mock-model"
-
-    try:
-        result = subprocess.run(
-            [sys.executable, str(AGENT_PATH), "What is 2+2?"],
-            capture_output=True,
-            text=True,
-            cwd=PROJECT_ROOT,
-            env=env,
-            check=False,
-        )
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=1)
+    """Validate the base JSON shape for a final answer."""
+    result = run_agent_with_mock_server("What is 2+2?", MockSimpleAnswerHandler)
 
     assert result.returncode == 0, f"Agent failed: {result.stderr}"
-
     output = json.loads(result.stdout)
 
     assert output["answer"] == "2 + 2 = 4."
-    assert "tool_calls" in output
+    assert output["source"] == "wiki/math.md#addition"
     assert output["tool_calls"] == []

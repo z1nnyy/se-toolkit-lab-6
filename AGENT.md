@@ -2,72 +2,94 @@
 
 ## Overview
 
-This agent is a small CLI tool that sends one user question to an OpenAI-compatible LLM API and prints a single JSON object to stdout. For Task 1 it does not have tools or an agentic loop yet, so the output always includes an empty `tool_calls` array. This gives us the basic plumbing we need before adding wiki tools in Task 2 and backend API access in Task 3.
+This agent is a CLI documentation assistant for the repository. It accepts one question as a command-line argument, sends that question to an OpenAI-compatible chat completions API, and returns a single JSON object to stdout. In Task 2 the agent stops being just a chatbot and becomes an actual agent: it can inspect the repository with tools, feed tool results back into the model, and then produce a grounded answer with a source reference.
+
+The agent is designed to answer documentation questions from the project wiki first. Instead of relying on the model's memory, it asks the model to discover files with `list_files`, inspect relevant documents with `read_file`, and only then produce a final answer. The final output includes the answer text, the source path with a section anchor, and the full list of tool calls made during reasoning.
 
 ## Architecture
 
-```
-User → agent.py (CLI) → OpenAI-compatible LLM API → JSON response
+```text
+User -> agent.py -> LLM with tool schemas
+                 -> tool call(s): list_files / read_file
+                 -> tool result(s) appended to message history
+                 -> final JSON answer with source
 ```
 
-## LLM Provider
+The main loop works like this:
 
-- **Provider:** OpenRouter
-- **Model:** read from `LLM_MODEL`
-- **API:** OpenAI-compatible `/v1/chat/completions` endpoint
+1. Load `.env.agent.secret` if present.
+2. Read the user question from the CLI.
+3. Send the system prompt, user question, and tool schemas to the LLM.
+4. If the LLM returns tool calls, execute them locally and append the tool results as `tool` messages.
+5. Repeat until the model returns a final answer or the maximum tool-call limit is reached.
+6. Print a single JSON line to stdout.
+
+## Tools
+
+### `list_files`
+
+- Input: repository-relative directory path
+- Output: newline-separated files and directories
+- Purpose: help the model discover where relevant documentation lives
+
+### `read_file`
+
+- Input: repository-relative file path
+- Output: file contents as text
+- Purpose: let the model inspect the actual documentation before answering
+
+Both tools enforce path security. Paths must be relative to the repository root, absolute paths are rejected, and traversal outside the repository is blocked after path resolution. If a path is invalid, the tool returns an error string instead of crashing the process.
+
+## System Prompt Strategy
+
+The system prompt tells the model to:
+
+- use repository tools instead of guessing
+- start with `wiki/` for documentation questions
+- use `list_files("wiki")` for discovery
+- use `read_file(...)` for the most relevant file
+- return final output as JSON with `answer` and `source`
+
+This keeps the model focused and reduces token waste, which matters when using limited OpenRouter credits.
 
 ## Configuration
 
 The agent reads configuration from `.env.agent.secret`:
 
-| Variable       | Purpose                  |
-| -------------- | ------------------------ |
+| Variable       | Purpose |
+| -------------- | ------- |
 | `LLM_API_KEY`  | API key for the LLM provider |
-| `LLM_API_BASE` | Base URL of the API      |
-| `LLM_MODEL`    | Model name to use        |
+| `LLM_API_BASE` | Base URL of the OpenAI-compatible API |
+| `LLM_MODEL`    | Model name |
 
-Environment variables already exported in the shell take precedence, and the `.env.agent.secret` file fills in missing values for local development. The CLI normalizes the base URL, sends a minimal system prompt plus the user question, and expects a standard chat completions response with `choices[0].message.content`.
-
-## Usage
-
-```bash
-# Set up environment
-cp .env.agent.example .env.agent.secret
-# Edit .env.agent.secret with your credentials
-
-# Run the agent
-uv run agent.py "What does REST stand for?"
-```
+Already-exported shell variables take precedence. The file is only a local convenience and must not be committed.
 
 ## Output Format
 
-The agent outputs a single JSON line to stdout:
+The agent prints a single JSON object to stdout:
 
 ```json
 {
-  "answer": "Representational State Transfer.",
-  "tool_calls": []
+  "answer": "Edit the conflicting file, choose the changes to keep, then stage and commit.",
+  "source": "wiki/git-workflow.md#resolving-merge-conflicts",
+  "tool_calls": [
+    {
+      "tool": "read_file",
+      "args": {"path": "wiki/git-workflow.md"},
+      "result": "..."
+    }
+  ]
 }
 ```
 
-- `answer` (string): The LLM's response
-- `tool_calls` (array): Empty in Task 1, populated in Tasks 2-3
-
-## Error Handling
-
-- Missing config values → exit 1 with a short message to stderr
-- Network or timeout errors → exit 1 with a short message to stderr
-- HTTP errors from the provider → exit 1 with status code and provider response
-- No question provided → print usage, exit 1
-
-All errors are printed to stderr.
+Debug and error messages go to stderr only.
 
 ## Testing
 
-The regression test runs `agent.py` as a subprocess, but it does not call the real provider. Instead, it starts a tiny local HTTP server that returns a fixed OpenAI-compatible response. That keeps the test deterministic, fast, and free, which matters when using OpenRouter credits. The test then parses stdout as JSON and verifies that the required `answer` and `tool_calls` fields are present.
+The regression tests do not call the real LLM provider. Instead, they start a tiny local HTTP server that mimics an OpenAI-compatible API and returns scripted tool-calling responses. That makes the tests deterministic, free, and safe to run repeatedly while developing.
 
-Run the Task 1 test with:
+Run the local tests with:
 
 ```bash
-uv run pytest tests/test_agent_task1.py -v
+uv run pytest tests/test_agent_task1.py tests/test_agent_task2.py -v
 ```
